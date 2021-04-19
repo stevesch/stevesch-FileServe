@@ -25,8 +25,6 @@ void setup()
   stevesch::WiFiConnector::setOnConnected(handleWifiConnected);
   stevesch::WiFiConnector::setup(&server, ESP_NAME, ESP_AUTH);
 
-  server.begin();
-
   Serial.println("Setup complete.");
 }
 
