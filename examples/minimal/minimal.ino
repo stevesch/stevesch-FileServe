@@ -32,7 +32,7 @@ void setup()
 
 void loop()
 {
-  // place loop code here
+  stevesch::WiFiConnector::loop();
 }
 
 ///////////////////////////////////////
