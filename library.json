@@ -1,11 +1,11 @@
 {
-  "name": "stevesch-LibraryName",
+  "name": "stevesch-FileServe",
   "keywords": "",
   "description": "",
   "repository":
   {
     "type": "git",
-    "url": "https://github.com/stevesch/stevesch-LibraryName"
+    "url": "https://github.com/stevesch/stevesch-FileServe"
   },
   "exclude": "tests",
   "frameworks": "arduino",
