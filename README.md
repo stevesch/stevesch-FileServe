@@ -1,5 +1,7 @@
 # stevesch-FileServe
 Quickly add file serving capability to any wifi-enabled ESP32 sketch.
+
+![Example Screencap](examples/minimal/file-list-screenshot.png)
 # Building and Running
 If you already have a sketch connecting to WiFi, simply do the following (see minimal.ino in examples folder for a working example):
 
