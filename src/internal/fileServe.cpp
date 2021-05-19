@@ -129,6 +129,7 @@ void handleMore(AsyncWebServerRequest *request)
   if (f) {
     fileSize = f.size();
   }
+  yield();
 
   if (fileSize > kDisplaySizeMax)
   {
@@ -158,6 +159,7 @@ void handleMore(AsyncWebServerRequest *request)
     while (n) {
       size_t toRead = std::min(n, kReadChunkMax);
       int numRead = f.read(buf, toRead);
+      yield();
       if (!numRead) {
         break;
       }
@@ -166,6 +168,7 @@ void handleMore(AsyncWebServerRequest *request)
       escape(esc);
       s += esc;
       n -= numRead;
+      yield();
     }
     Serial.printf("Added %d characters to output\n", (int)(s.length() - l0));
     s += "</code></pre></div>";
@@ -174,10 +177,10 @@ void handleMore(AsyncWebServerRequest *request)
     }
     f.close();
   }
-
   s += "</div>";
-
   s += kPageTemplatePostBody;
+  yield();
+
   request->send(200, "text/html", s);
 }
 
