@@ -177,7 +177,6 @@ void handleMore(AsyncWebServerRequest *request)
     }
     f.close();
   }
-  SPIFFS.end();
 
   s += "</div>";
   s += kPageTemplatePostBody;
@@ -260,7 +259,6 @@ void handleListFiles(AsyncWebServerRequest *request)
       file = root.openNextFile();
   }
   root.close();
-  SPIFFS.end();
 
   s += "</table>";
   s += "</div>";
@@ -277,7 +275,6 @@ void handleServeFile(AsyncWebServerRequest *request)
   }
   String filePath = request->arg("path");
   request->send(SPIFFS, filePath);
-  SPIFFS.end();
 }
 
 }
