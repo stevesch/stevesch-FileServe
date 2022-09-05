@@ -3,11 +3,12 @@
 #include <Arduino.h>
 
 class AsyncWebServer;
+class FS;
 
 namespace stevesch
 {
 namespace FileServe {
-  void begin(AsyncWebServer& server);
+  void begin(AsyncWebServer& server, FS* optionalFileSys=0);
 }
 }
 

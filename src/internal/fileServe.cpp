@@ -8,15 +8,22 @@ namespace
 {
 void handleListFiles(AsyncWebServerRequest *request);
 void handleMore(AsyncWebServerRequest *request);
+void handleRemove(AsyncWebServerRequest *request);
 void handleServeFile(AsyncWebServerRequest *request);
+
+FS* sFileSys = &SPIFFS;
 }
 
 namespace stevesch {
 namespace FileServe {
-  void begin(AsyncWebServer& server)
+  void begin(AsyncWebServer& server, FS* optionalFileSys)
   {
+    if (optionalFileSys) {
+      sFileSys = optionalFileSys;
+    }
     server.on("/ls", HTTP_GET, handleListFiles);
     server.on("/more", HTTP_GET, handleMore);
+    server.on("/rm", HTTP_GET, handleRemove);
     server.on("/dl", HTTP_GET, handleServeFile);
   }
 } // namespace FileServe
@@ -39,6 +46,7 @@ li { display: block; float: left; color: black; font-family: Verdana; text-align
 li a:hover { background-color: #96c47f; }
 code { background-color: #ffffff; }
 .pr { display: flex; flex-flow: column; flex-wrap: wrap; font-family: Courier; font-size: 15px; padding: 2px 6px; border-left: 4px solid #60e060; }
+.cod { white-space: pre-wrap; word-break: break-word }
 .rt { float: right }
 .hdr { font-weight: bold; color: white; }
 .dlicon { margin: 2px 6px; }
@@ -87,10 +95,18 @@ const char kBackToLsIcon[] PROGMEM = R"#HTM(
 // <i class="fas fa-arrow-left"></i>
 // <i class="fas fa-bars"></i>
 
-void postSpiffsError(AsyncWebServerRequest *request)
+void postFsError(AsyncWebServerRequest *request)
 {
-  Serial.println("An Error has occurred while mounting SPIFFS");
+  Serial.println("File system error (is it formatted?)");
   request->send(500, "text/html", kErrorPage);
+}
+
+bool validateFileSys()
+{
+  if (sFileSys == &SPIFFS) {
+    return SPIFFS.begin();
+  }
+  return true;
 }
 
 const int kDisplaySizeMax = 65536;
@@ -100,8 +116,8 @@ uint8_t buf[kReadChunkMax + 1];
 // Show file contents
 void handleMore(AsyncWebServerRequest *request)
 {
-  if (!SPIFFS.begin(true)) {
-    postSpiffsError(request);
+  if (!validateFileSys()) {
+    postFsError(request);
     return;
   }
 
@@ -122,8 +138,8 @@ void handleMore(AsyncWebServerRequest *request)
   s += filePath;
 
   File f;
-  if (SPIFFS.exists(filePath)) {
-    f = SPIFFS.open(filePath);
+  if (sFileSys->exists(filePath)) {
+    f = sFileSys->open(filePath, FILE_READ);
   }
   size_t fileSize = 0;
   if (f) {
@@ -146,7 +162,7 @@ void handleMore(AsyncWebServerRequest *request)
   s += "<div class=\"content\">";
 
   if (f) {
-    s += "<div><pre class=\"pr\"><code>";
+    s += "<div><pre class=\"pr\"><code class=\"cod\">";
     // AsyncWebServerResponse* resp = request->beginChunkedResponse("test/html"); // TODO?
     bool overflow = false;
     size_t n = f.available();
@@ -156,6 +172,8 @@ void handleMore(AsyncWebServerRequest *request)
     }
     Serial.printf("Reading %d bytes from %s\n", (int)n, filePath.c_str());
     int l0 = s.length();
+    String esc;
+    esc.reserve(std::min(n, kReadChunkMax + 1));
     while (n) {
       size_t toRead = std::min(n, kReadChunkMax);
       int numRead = f.read(buf, toRead);
@@ -163,8 +181,8 @@ void handleMore(AsyncWebServerRequest *request)
       if (!numRead) {
         break;
       }
-      buf[numRead + 1] = '\0';
-      String esc((const char*)buf);
+      buf[numRead] = '\0';
+      esc = (const char*)buf;
       escape(esc);
       s += esc;
       n -= numRead;
@@ -177,7 +195,11 @@ void handleMore(AsyncWebServerRequest *request)
     }
     f.close();
   }
-
+  else
+  {
+    Serial.printf("### Unable to read file '%s'\n", filePath.c_str());
+    Serial.printf("### reported file size %d\n", (int)fileSize);
+  }
   s += "</div>";
   s += kPageTemplatePostBody;
   yield();
@@ -185,16 +207,30 @@ void handleMore(AsyncWebServerRequest *request)
   request->send(200, "text/html", s);
 }
 
+void handleRemove(AsyncWebServerRequest *request)
+{
+  if (!validateFileSys()) {
+    postFsError(request);
+    return;
+  }
+  String filePath = request->arg("path");
+  File f;
+  if (sFileSys->exists(filePath)) {
+    sFileSys->remove(filePath);
+  }
+  request->redirect("/ls");
+}
+
 void handleListFiles(AsyncWebServerRequest *request)
 {
-  if (!SPIFFS.begin(true)) {
-    postSpiffsError(request);
+  if (!validateFileSys()) {
+    postFsError(request);
     return;
   }
 
   String s(kPageTemplatePreBody);
   s.replace("%TITLE%", "File List");
-  File root = SPIFFS.open("/");
+  File root = sFileSys->open("/", FILE_READ);
   File file = root.openNextFile();
 
   s += "<ul>";
@@ -211,7 +247,8 @@ void handleListFiles(AsyncWebServerRequest *request)
   s += "<table>";
   while (file)
   {
-      const char* fileName = file.name();
+      // const char* fileName = file.name();
+      const char* filePath = file.path();
       size_t fileSize = file.size();
       // Serial.print("FILE: ");
       // Serial.println(file.name());
@@ -220,7 +257,7 @@ void handleListFiles(AsyncWebServerRequest *request)
       s += "<td>";
       s += "<a download href=\"";
       s += "/dl?path=";
-      s += fileName;
+      s += filePath;
       s += "\">";
       s += "<i class=\"dlicon fas fa-download\" color=\"#29a64f\"></i>";
       s += "</a>";
@@ -247,9 +284,18 @@ void handleListFiles(AsyncWebServerRequest *request)
       s += "<td>";
       s += "<a href=\"";
       s += "/more?path=";
-      s += fileName;
+      s += filePath;
       s += "\">";
-      s += fileName;
+      s += filePath;
+      s += "</a>";
+      s += "</td>";
+
+      s += "<td>";
+      s += "<a href=\"";
+      s += "/rm?path=";
+      s += filePath;
+      s += "\">";
+      s += "<i class=\"dlicon fas fa-trash-alt\" color=\"#8c0106\"></i>";
       s += "</a>";
       s += "</td>";
 
@@ -269,12 +315,13 @@ void handleListFiles(AsyncWebServerRequest *request)
 
 void handleServeFile(AsyncWebServerRequest *request)
 {
-  if (!SPIFFS.begin(true)) {
-    postSpiffsError(request);
+  if (!validateFileSys()) {
+    postFsError(request);
     return;
   }
+
   String filePath = request->arg("path");
-  request->send(SPIFFS, filePath);
+  request->send(*sFileSys, filePath);
 }
 
 }
