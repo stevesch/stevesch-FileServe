@@ -10,6 +10,7 @@ void handleListFiles(AsyncWebServerRequest *request);
 void handleMore(AsyncWebServerRequest *request);
 void handleRemove(AsyncWebServerRequest *request);
 void handleServeFile(AsyncWebServerRequest *request);
+void handleTestPage(AsyncWebServerRequest *request);
 
 FS* sFileSys = &SPIFFS;
 }
@@ -25,15 +26,21 @@ namespace FileServe {
     server.on("/more", HTTP_GET, handleMore);
     server.on("/rm", HTTP_GET, handleRemove);
     server.on("/dl", HTTP_GET, handleServeFile);
+    server.on("/fileServeTest", HTTP_GET, handleTestPage);
   }
 } // namespace FileServe
 } // namespace stevesch
 
 namespace
 {
-const char kPageTemplatePreBody[] PROGMEM = R"rawliteral(
+
+const char kPagePreTitle[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML>
-<html><head><title>%TITLE%</title>
+<html><head><title>
+)rawliteral";
+
+const char kPagePostTitle[] PROGMEM = R"rawliteral(
+</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
 <style>
@@ -127,8 +134,10 @@ void handleMore(AsyncWebServerRequest *request)
 
   String filePath = request->arg("path");
 
-  String s(kPageTemplatePreBody);
-  s.replace("%TITLE%", String("File: ") + filePath);
+  String s(kPagePreTitle);
+  s += "File: ";
+  s += filePath;
+  s += kPagePostTitle;
 
   s += "<ul>";
 
@@ -228,89 +237,89 @@ void handleListFiles(AsyncWebServerRequest *request)
     return;
   }
 
-  String s(kPageTemplatePreBody);
-  s.replace("%TITLE%", "File List");
   File root = sFileSys->open("/", FILE_READ);
+  if (!root) {
+    request->send(500, "text/plain", "Failed to open directory");
+    return;
+  }
+
+  int numListed = 0;
+  const int kMaxToList = 20;
+  const size_t bufSize = 8192;
+
+  AsyncResponseStream *response = request->beginResponseStream("text/html", bufSize);
+  response->setCode(200);
+
+  response->print(kPagePreTitle);
+  response->print("File List");
+  response->print(kPagePostTitle);
+
+  response->print("<ul>");
+  response->print(kMainIcon);
+  response->print("<li><span class=\"hdr\">Files:</span></li></ul>");
+
+  response->print("<div class=\"content\"><table>");
+
   File file = root.openNextFile();
-
-  s += "<ul>";
-
-  s += kMainIcon;
-
-  s += "<li>";
-  s += "<span class=\"hdr\">Files:</span>";
-  s += "</li>";
-
-  s += "</ul>";
-
-  s += "<div class=\"content\">";
-  s += "<table>";
   while (file)
   {
       // const char* fileName = file.name();
-      const char* filePath = file.path();
+      String filePath = String(file.path());
       size_t fileSize = file.size();
       // Serial.print("FILE: ");
       // Serial.println(file.name());
-      s += "<tr>";
 
-      s += "<td>";
-      s += "<a download href=\"";
-      s += "/dl?path=";
-      s += filePath;
-      s += "\">";
-      s += "<i class=\"dlicon fas fa-download\" color=\"#29a64f\"></i>";
-      s += "</a>";
-      s += "</td>";
+      response->print("<tr><td><a download href=\"/dl?path=");
+      response->print(filePath);
+      response->print("\"><i class=\"dlicon fas fa-download\" color=\"#29a64f\"></i></a></td>");
 
-      s += "<td>";
+      response->print("<td>");
       if (fileSize < 4096) {
         // bytes
-        s += fileSize;
-        s += "B";
+        response->print((int)fileSize);
+        response->print("B");
       } else if (fileSize < 1024*1024) {
         float k = (float)fileSize / 1024;
         String sz(k, 2);
-        s += sz;
-        s += "K";
+        response->print(sz);
+        response->print("K");
       } else {
         float m = (float)fileSize / (1024*1024);
         String sz(m, 2);
-        s += sz;
-        s += "M";
+        response->print(sz);
+        response->print("M");
       }
-      s += "</td>";
+      response->print("</td>");
 
-      s += "<td>";
-      s += "<a href=\"";
-      s += "/more?path=";
-      s += filePath;
-      s += "\">";
-      s += filePath;
-      s += "</a>";
-      s += "</td>";
+      response->print("<td><a href=\"/more?path=");
+      response->print(filePath);
+      response->print("\">");
+      response->print(filePath);
+      response->print("</a></td>");
 
-      s += "<td>";
-      s += "<a href=\"";
-      s += "/rm?path=";
-      s += filePath;
-      s += "\">";
-      s += "<i class=\"dlicon fas fa-trash-alt\" color=\"#8c0106\"></i>";
-      s += "</a>";
-      s += "</td>";
+      response->print("<td><a href=\"/rm?path=");
+      response->print(filePath);
+      response->print("\"><i class=\"dlicon fas fa-trash-alt\" color=\"#8c0106\"></i></a></td></tr>");
 
-      s += "</tr>";
       file.close();
+      numListed++;
+      if (numListed >= kMaxToList) {
+        response->print("<tr><td>. . .</td></tr>");
+        break;
+      }
+
       yield();
       file = root.openNextFile();
   }
   root.close();
 
-  s += "</table>";
-  s += "</div>";
+  response->print("</table></div>");
 
-  s += kPageTemplatePostBody;
-  request->send(200, "text/html", s);
+  response->print(kPageTemplatePostBody);
+
+  request->send(response);
+
+  Serial.println("File listing complete.");
 }
 
 void handleServeFile(AsyncWebServerRequest *request)
@@ -322,6 +331,22 @@ void handleServeFile(AsyncWebServerRequest *request)
 
   String filePath = request->arg("path");
   request->send(*sFileSys, filePath);
+}
+
+const char kPageTest[] PROGMEM = R"rawliteral(
+<!DOCTYPE HTML>
+<html><head>
+  <title>Test Page</title>
+</head>
+<body>
+  Test Page Placeholder Content
+</body>
+</html>)rawliteral";
+
+void handleTestPage(AsyncWebServerRequest *request)
+{
+  const char* content = kPageTest;
+  request->send(200, "text/html", content);
 }
 
 }
