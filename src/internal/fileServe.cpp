@@ -17,6 +17,9 @@ FS* sFileSys = &SPIFFS;
 
 namespace stevesch {
 namespace FileServe {
+  int sDisplaySizeMax = 65536;
+  int sLsMaxToList = 100;
+
   void begin(AsyncWebServer& server, FS* optionalFileSys)
   {
     if (optionalFileSys) {
@@ -105,18 +108,19 @@ const char kBackToLsIcon[] PROGMEM = R"#HTM(
 void postFsError(AsyncWebServerRequest *request)
 {
   Serial.println("File system error (is it formatted?)");
-  request->send(500, "text/html", kErrorPage);
+  request->send(500, "text/html", FPSTR(kErrorPage));
 }
 
 bool validateFileSys()
 {
-  if (sFileSys == &SPIFFS) {
-    return SPIFFS.begin();
-  }
+  // XXX SPIFFS.begin MUST be called externally before using FileServe,
+  // but we can't call .begin multiple times, so we just assume it's done.
+  // if (sFileSys == &SPIFFS) {
+  //   return SPIFFS.begin();
+  // }
   return true;
 }
 
-const int kDisplaySizeMax = 65536;
 const size_t kReadChunkMax = 1023;
 uint8_t buf[kReadChunkMax + 1];
 
@@ -134,55 +138,56 @@ void handleMore(AsyncWebServerRequest *request)
 
   String filePath = request->arg("path");
 
-  String s(kPagePreTitle);
-  s += "File: ";
-  s += filePath;
-  s += kPagePostTitle;
+  AsyncResponseStream* response = request->beginResponseStream("text/html", 8192);
+  response->setCode(200);
 
-  s += "<ul>";
+  // Title/header
+  response->print(FPSTR(kPagePreTitle));
+  response->print(F("File: "));
+  response->print(filePath);
+  response->print(FPSTR(kPagePostTitle));
 
-  s += kBackToLsIcon;
-  
-  s += "<li><span class=\"hdr\">File ";
-  s += filePath;
+  response->print(F("<ul>"));
+  response->print(FPSTR(kBackToLsIcon));
+  response->print(F("<li><span class=\"hdr\">File "));
+  response->print(filePath);
 
   File f;
   if (sFileSys->exists(filePath)) {
     f = sFileSys->open(filePath, FILE_READ);
   }
-  size_t fileSize = 0;
-  if (f) {
-    fileSize = f.size();
-  }
+  size_t fileSize = f ? f.size() : 0;
   yield();
 
-  if (fileSize > kDisplaySizeMax)
+  if (fileSize > stevesch::FileServe::sDisplaySizeMax)
   {
-    s += " (truncated-- size ";
-    s += fileSize;
-    s += " exceeds display size of ";
-    s += kDisplaySizeMax;
-    s += ")";
+    response->print(F(" (truncated-- size "));
+    response->print(fileSize);
+    response->print(F(" exceeds display size of "));
+    response->print(stevesch::FileServe::sDisplaySizeMax);
+    response->print(F(")"));
   }
-  s += "</span></li>";
-  
-  s += "</ul>";
 
-  s += "<div class=\"content\">";
+  response->print(F("</span></li>"));
+  response->print(F("</ul>"));
+  response->print(F("<div class=\"content\">"));
 
   if (f) {
-    s += "<div><pre class=\"pr\"><code class=\"cod\">";
-    // AsyncWebServerResponse* resp = request->beginChunkedResponse("test/html"); // TODO?
+    response->print(F("<div><pre class=\"pr\"><code class=\"cod\">"));
+
     bool overflow = false;
     size_t n = f.available();
-    if (n > kDisplaySizeMax) {
-      n = kDisplaySizeMax;
+    if (n > stevesch::FileServe::sDisplaySizeMax) {
+      n = stevesch::FileServe::sDisplaySizeMax;
       overflow = true;
     }
+
     Serial.printf("Reading %d bytes from %s\n", (int)n, filePath.c_str());
-    int l0 = s.length();
+
     String esc;
     esc.reserve(std::min(n, kReadChunkMax + 1));
+
+    size_t totalAdded = 0;
     while (n) {
       size_t toRead = std::min(n, kReadChunkMax);
       int numRead = f.read(buf, toRead);
@@ -193,14 +198,19 @@ void handleMore(AsyncWebServerRequest *request)
       buf[numRead] = '\0';
       esc = (const char*)buf;
       escape(esc);
-      s += esc;
+
+      response->print(esc);
+      totalAdded += esc.length();
+
       n -= numRead;
       yield();
     }
-    Serial.printf("Added %d characters to output\n", (int)(s.length() - l0));
-    s += "</code></pre></div>";
+
+    Serial.printf("Added %d characters to output\n", (int)totalAdded);
+
+    response->print(F("</code></pre></div>"));
     if (overflow) {
-      s += "<div>. . . (more)</div>";
+      response->print(F("<div>. . . (more)</div>"));
     }
     f.close();
   }
@@ -208,12 +218,13 @@ void handleMore(AsyncWebServerRequest *request)
   {
     Serial.printf("### Unable to read file '%s'\n", filePath.c_str());
     Serial.printf("### reported file size %d\n", (int)fileSize);
+    response->print(F("<div><i>File not found</i></div>"));
   }
-  s += "</div>";
-  s += kPageTemplatePostBody;
-  yield();
+  response->print(F("</div>"));
 
-  request->send(200, "text/html", s);
+  response->print(FPSTR(kPageTemplatePostBody));
+  yield();
+  request->send(response);
 }
 
 void handleRemove(AsyncWebServerRequest *request)
@@ -232,6 +243,8 @@ void handleRemove(AsyncWebServerRequest *request)
 
 void handleListFiles(AsyncWebServerRequest *request)
 {
+  Serial.println("Listing files...");
+
   if (!validateFileSys()) {
     postFsError(request);
     return;
@@ -244,18 +257,17 @@ void handleListFiles(AsyncWebServerRequest *request)
   }
 
   int numListed = 0;
-  const int kMaxToList = 20;
   const size_t bufSize = 8192;
 
   AsyncResponseStream *response = request->beginResponseStream("text/html", bufSize);
   response->setCode(200);
 
-  response->print(kPagePreTitle);
+  response->print(FPSTR(kPagePreTitle));
   response->print("File List");
-  response->print(kPagePostTitle);
+  response->print(FPSTR(kPagePostTitle));
 
   response->print("<ul>");
-  response->print(kMainIcon);
+  response->print(FPSTR(kMainIcon));
   response->print("<li><span class=\"hdr\">Files:</span></li></ul>");
 
   response->print("<div class=\"content\"><table>");
@@ -303,7 +315,7 @@ void handleListFiles(AsyncWebServerRequest *request)
 
       file.close();
       numListed++;
-      if (numListed >= kMaxToList) {
+      if (numListed >= stevesch::FileServe::sLsMaxToList) {
         response->print("<tr><td>. . .</td></tr>");
         break;
       }
@@ -315,7 +327,7 @@ void handleListFiles(AsyncWebServerRequest *request)
 
   response->print("</table></div>");
 
-  response->print(kPageTemplatePostBody);
+  response->print(FPSTR(kPageTemplatePostBody));
 
   request->send(response);
 
@@ -345,8 +357,7 @@ const char kPageTest[] PROGMEM = R"rawliteral(
 
 void handleTestPage(AsyncWebServerRequest *request)
 {
-  const char* content = kPageTest;
-  request->send(200, "text/html", content);
+  request->send(200, "text/html", FPSTR(kPageTest));
 }
 
 }
