@@ -93,6 +93,33 @@ void escape(String& esc)
   esc.replace("\r\n", "\n");
 }
 
+void writeEscapedChunk(AsyncResponseStream* response, const uint8_t* data, size_t len)
+{
+  for (size_t i = 0; i < len; ++i) {
+    char ch = static_cast<char>(data[i]);
+    switch (ch) {
+      case '>':
+        response->print(F("&gt;"));
+        break;
+      case '<':
+        response->print(F("&lt;"));
+        break;
+      case '\"':
+        response->print(F("&quot;"));
+        break;
+      case '\'':
+        response->print(F("&apos;"));
+        break;
+      case '\r':
+        // drop carriage returns; rely on the newline that follows
+        break;
+      default:
+        response->write(reinterpret_cast<const uint8_t*>(&ch), 1);
+        break;
+    }
+  }
+}
+
 const char kMainIcon[] PROGMEM = R"#HTM(
   <li><a href="/"><i class="fas fa-home" style="color: white"></i></a></li>
 )#HTM";
@@ -184,9 +211,6 @@ void handleMore(AsyncWebServerRequest *request)
 
     Serial.printf("Reading %d bytes from %s\n", (int)n, filePath.c_str());
 
-    String esc;
-    esc.reserve(std::min(n, kReadChunkMax + 1));
-
     size_t totalAdded = 0;
     while (n) {
       size_t toRead = std::min(n, kReadChunkMax);
@@ -195,18 +219,16 @@ void handleMore(AsyncWebServerRequest *request)
       if (!numRead) {
         break;
       }
-      buf[numRead] = '\0';
-      esc = (const char*)buf;
-      escape(esc);
-
-      response->print(esc);
-      totalAdded += esc.length();
+      writeEscapedChunk(response, buf, numRead);
+      totalAdded += numRead;
 
       n -= numRead;
-      yield();
+      if ((totalAdded % 10240) == 0) {
+        yield();
+      }
     }
 
-    Serial.printf("Added %d characters to output\n", (int)totalAdded);
+    Serial.printf("Streamed %d bytes to output\n", static_cast<int>(totalAdded));
 
     response->print(F("</code></pre></div>"));
     if (overflow) {
