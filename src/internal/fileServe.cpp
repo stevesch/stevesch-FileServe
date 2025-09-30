@@ -17,8 +17,8 @@ FS* sFileSys = &SPIFFS;
 
 namespace stevesch {
 namespace FileServe {
-  int sDisplaySizeMax = 65536;
-  int sLsMaxToList = 100;
+  int sDisplaySizeMax = 16384;
+  int sLsMaxToList = 40;
 
   void begin(AsyncWebServer& server, FS* optionalFileSys)
   {
@@ -364,7 +364,16 @@ void handleServeFile(AsyncWebServerRequest *request)
   }
 
   String filePath = request->arg("path");
-  request->send(*sFileSys, filePath);
+  if (!sFileSys->exists(filePath)) {
+    request->send(404, "text/plain", "File not found");
+    return;
+  }
+
+  const char *contentType = "application/octet-stream";
+  AsyncWebServerResponse *response = request->beginResponse(*sFileSys, filePath, contentType, true);
+  const String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+  response->addHeader("Content-Disposition", "attachment; filename=\"" + fileName + "\"");
+  request->send(response);
 }
 
 const char kPageTest[] PROGMEM = R"rawliteral(
