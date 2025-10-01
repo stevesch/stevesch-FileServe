@@ -17,8 +17,8 @@ FS* sFileSys = &SPIFFS;
 
 namespace stevesch {
 namespace FileServe {
-  int sDisplaySizeMax = 16384;
-  int sLsMaxToList = 40;
+  int sDisplaySizeMax = 102400;
+  int sLsMaxToList = 128;
 
   void begin(AsyncWebServer& server, FS* optionalFileSys)
   {
