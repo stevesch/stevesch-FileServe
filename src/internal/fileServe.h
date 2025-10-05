@@ -11,7 +11,6 @@ namespace FileServe {
   void begin(AsyncWebServer& server, FS* optionalFileSys=0);
   
   extern int sDisplaySizeMax; // default 65536
-  extern int sLsMaxToList;    // default 100
 }
 }
 
