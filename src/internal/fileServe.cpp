@@ -268,11 +268,42 @@ void handleMore(AsyncWebServerRequest *request)
       response->print(F("<div style=\"text-align:center\">"));
       response->print(F("<img id=\"preview\" style=\"max-width:100%;height:auto\">"));
       response->print(F("</div>"));
-      // set src via JS to ensure correct encoding in case of odd characters
-      response->print("<script>document.getElementById('preview').src='/dl?path=");
-      response->print(enc);
-      response->print("';</script>");
+  // set src via JS to ensure correct encoding in case of odd characters
+  response->print("<script>document.getElementById('preview').src='/dl?path=");
+  response->print(enc);
+  response->print("&inline=1';</script>");
 
+      response->print(FPSTR(kPageTemplatePostBody));
+      yield();
+      request->send(response);
+      return;
+    }
+  }
+
+  // For large text-like files, embed an iframe that loads the raw file inline
+  // instead of streaming and escaping its bytes here. This prevents heavy
+  // escaping operations on large files (like big HTML or JS files) that can
+  // cause memory pressure and crashes.
+  if (f) {
+    String pathLower2 = String(filePath);
+    pathLower2.toLowerCase();
+    bool isTextLike = false;
+    if (pathLower2.endsWith(".html") || pathLower2.endsWith(".htm") || pathLower2.endsWith(".css") || pathLower2.endsWith(".js") || pathLower2.endsWith(".txt") || pathLower2.endsWith(".json") || pathLower2.endsWith(".xml")) {
+      isTextLike = true;
+    }
+    if (isTextLike && fileSize > 8*1024) {
+      // close file and return an iframe to load it inline from /dl
+      f.close();
+      char enc2[256];
+      urlEncode(filePath, enc2, sizeof(enc2));
+
+      response->print(F("<div class=\"content\">"));
+      response->print(F("<div style=\"width:100%;height:70vh;\">"));
+      response->print(F("<iframe id=\"previewif\" style=\"width:100%;height:100%;border:0\"></iframe>"));
+      response->print(F("</div>"));
+      response->print("<script>document.getElementById('previewif').src='/dl?path=");
+      response->print(enc2);
+      response->print("&inline=1';</script>");
       response->print(FPSTR(kPageTemplatePostBody));
       yield();
       request->send(response);
@@ -448,10 +479,30 @@ void handleServeFile(AsyncWebServerRequest *request)
     return;
   }
 
-  const char *contentType = "application/octet-stream";
+  // Check if the client asked to render inline
+  bool inlineFlag = request->hasArg("inline") && request->arg("inline").length();
+
+  // Basic MIME mapping by extension for common types
+  const char* contentType = "application/octet-stream";
+  String fpLower = filePath;
+  fpLower.toLowerCase();
+  if (fpLower.endsWith(".html") || fpLower.endsWith(".htm")) contentType = "text/html";
+  else if (fpLower.endsWith(".css")) contentType = "text/css";
+  else if (fpLower.endsWith(".js")) contentType = "application/javascript";
+  else if (fpLower.endsWith(".json")) contentType = "application/json";
+  else if (fpLower.endsWith(".txt")) contentType = "text/plain";
+  else if (fpLower.endsWith(".png")) contentType = "image/png";
+  else if (fpLower.endsWith(".jpg") || fpLower.endsWith(".jpeg")) contentType = "image/jpeg";
+  else if (fpLower.endsWith(".gif")) contentType = "image/gif";
+  else if (fpLower.endsWith(".bmp")) contentType = "image/bmp";
+  else if (fpLower.endsWith(".webp")) contentType = "image/webp";
+  else if (fpLower.endsWith(".svg")) contentType = "image/svg+xml";
+
   AsyncWebServerResponse *response = request->beginResponse(*sFileSys, filePath, contentType, true);
   const String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
-  response->addHeader("Content-Disposition", "attachment; filename=\"" + fileName + "\"");
+  if (!inlineFlag) {
+    response->addHeader("Content-Disposition", "attachment; filename=\"" + fileName + "\"");
+  }
   request->send(response);
 }
 
